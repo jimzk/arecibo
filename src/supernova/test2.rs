@@ -458,7 +458,7 @@ impl<E1> TestROM<E1> {
   }
 }
 
-pub static BENCHMARK_DATA_FILE: &str = "./nova_benchmark.csv";
+pub static BENCHMARK_DATA_FILE: &str = "./supernova_benchmark.csv";
 
 pub fn append_to_bench_data_file(content: String) {
   use std::io::Write;
@@ -476,7 +476,7 @@ pub fn init_bench_data_file() {
     File::create(&path).unwrap();
   }
   println!("Init bench data file in {}", BENCHMARK_DATA_FILE);
-  let header = "num_per_step,num_steps,total_num,time_generating_public_params (s),primary_circuit_constraints,secondary_circuit_constraints,primary_circuit_variables,secondary_circuit_variables,total_constraints,time_init_recursive_snark (s),time_folding (s),time_per_folding (s),time_verify_folding (s),time_compressed_snark_setup (s),time_compressed_snark_prove (s),time_compressed_snark_encoding (s),time_compressed_snark_verify (s),compressed_snark_len (bytes)\n";
+  let header = "op_len,start_time,public_params_setup_time (s),prove_time (s),compressed_snark_setup_time(s),compressed_snark_prove_time(s),compressed_snark_verify_time(s)\n";
   append_to_bench_data_file(header.to_string());
 }
 
@@ -500,6 +500,7 @@ fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
   // This is mostly done with the existing Nova code. With additions of U_i[] and program_counter checks
   // in the augmented circuit.
 
+  let start_timestamp = chrono::prelude::Utc::now();
   let mut rng = rand::thread_rng();
   let rom = {
     let mut counts = vec![single_count; OP_SIZE];
@@ -515,21 +516,22 @@ fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
     }
     v
   };
-  append_to_bench_data_file(format!("op_code len: {}", rom.len()));
+  let ops_len = rom.len();
+  println!("op_code len: {}", ops_len);
 
   let test_rom = TestROM::<E1>::new(rom);
 
   let start = Instant::now();
   let pp = PublicParams::setup(&test_rom, &*default_ck_hint(), &*default_ck_hint());
   let public_params_setup_time = start.elapsed();
-  append_to_bench_data_file(format!("PublicParams::setup, took {:?}", public_params_setup_time));
+  println!("PublicParams::setup, took {:?}", public_params_setup_time);
   // pp.
   for i in 0..OP_SIZE {
     let (constraints, variable) = pp.num_constraints_and_variables(i);
-    append_to_bench_data_file(format!("primary circuit op_code: {}, constraints: {}, variables: {}", i, constraints, variable));
+    println!("primary circuit op_code: {}, constraints: {}, variables: {}", i, constraints, variable);
   }
   let (constraints, variable) = pp.num_constraints_and_variables_secondary();
-  append_to_bench_data_file(format!("secondary circuit: {}, variables: {}", constraints, variable));
+  println!("secondary circuit: {}, variables: {}", constraints, variable);
 
   // extend z0_primary/secondary with rom content
   let mut z0_primary = vec![<E1 as Engine>::Scalar::ONE];
@@ -566,7 +568,7 @@ fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
         .prove_step(&pp, &circuit_primary, &circuit_secondary)
         .unwrap();
     let prove_step_time = start.elapsed();
-    append_to_bench_data_file(format!("step {} prove step, took {:?}", i, prove_step_time));
+    println!("step {} prove step, took {:?}", i, prove_step_time);
     prove_time += prove_step_time;
     recursive_snark
         .verify(&pp, &z0_primary, &z0_secondary)
@@ -583,7 +585,7 @@ fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
 
     recursive_snark_option = Some(recursive_snark)
   }
-  append_to_bench_data_file(format!("prove step, took {:?}", prove_time));
+  println!("prove, took {:?}", prove_time);
 
   assert!(recursive_snark_option.is_some());
 
@@ -596,27 +598,37 @@ fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
     ..
   } = &recursive_snark;
 
-  append_to_bench_data_file(format!("zi_primary: {:?}", zi_primary));
-  append_to_bench_data_file(format!("zi_secondary: {:?}", zi_secondary));
-  append_to_bench_data_file(format!("final program_counter: {:?}", program_counter));
+  println!("zi_primary: {:?}", zi_primary);
+  println!("zi_secondary: {:?}", zi_secondary);
+  println!("final program_counter: {:?}", program_counter);
 
 
   let start = Instant::now();
   let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
   let compressed_snark_set_up_time = start.elapsed();
-  append_to_bench_data_file(format!("CompressedSNARK::setup, took {:?}", compressed_snark_set_up_time));
+  println!("CompressedSNARK::setup, took {:?}", compressed_snark_set_up_time);
 
   let start = Instant::now();
   let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
   let compressed_snark_prove_time = start.elapsed();
-  append_to_bench_data_file(format!("CompressedSNARK::prove, took {:?}", compressed_snark_prove_time));
+  println!("CompressedSNARK::prove, took {:?}", compressed_snark_prove_time);
 
   let start = Instant::now();
   compressed_snark
       .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
       .unwrap();
   let compressed_snark_verify_time = start.elapsed();
-  append_to_bench_data_file(format!("CompressedSNARK::verify, took {:?}", compressed_snark_verify_time));
+  println!("CompressedSNARK::verify, took {:?}", compressed_snark_verify_time);
+
+  let start_timestamp = start_timestamp.format("%Y-%m-%d %H:%M:%S");
+  let public_params_setup_time = public_params_setup_time.as_secs_f32();
+  let prove_time = prove_time.as_secs_f32();
+  let compressed_snark_set_up_time = compressed_snark_set_up_time.as_secs_f32();
+  let compressed_snark_prove_time = compressed_snark_prove_time.as_secs_f32();
+  let compressed_snark_verify_time = compressed_snark_verify_time.as_secs_f32();
+
+  let line = format!("{ops_len},{start_timestamp},{public_params_setup_time},{prove_time},{compressed_snark_set_up_time},{compressed_snark_prove_time},{compressed_snark_verify_time}\n");
+  append_to_bench_data_file(line);
 
   // The final program counter should be -1
   assert_eq!(*program_counter, -<E1 as Engine>::Scalar::ONE);
@@ -633,7 +645,7 @@ fn test_trivial_nivc() {
   // Experimenting with selecting the running claims for nifs
   init_bench_data_file();
   println!("Init bench data file in {}", BENCHMARK_DATA_FILE);
-  for i in 1..2 {
+  for i in 1..=10 {
     test_trivial_nivc_with::<PallasEngine, S1<_>, S2<_>>(i);
   }
 }

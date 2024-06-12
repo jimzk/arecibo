@@ -1,11 +1,15 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unreachable_code)]
+
 use crate::gadgets::alloc_zero;
 use crate::provider::poseidon::PoseidonConstantsCircuit;
-use crate::provider::Bn256EngineIPA;
+use crate::provider::{Bn256EngineIPA, Bn256EngineKZG, GrumpkinEngine, ipa_pc};
 use crate::provider::PallasEngine;
 use crate::provider::Secp256k1Engine;
 use crate::provider::VestaEngine;
 use crate::supernova::circuit::{StepCircuit, TrivialSecondaryCircuit, TrivialTestCircuit};
-use crate::traits::snark::default_ck_hint;
+use crate::traits::snark::{BatchedRelaxedR1CSSNARKTrait, default_ck_hint, RelaxedR1CSSNARKTrait};
 use crate::{bellpepper::test_shape_cs::TestShapeCS, gadgets::alloc_one};
 use abomonation::Abomonation;
 use bellpepper_core::num::AllocatedNum;
@@ -15,18 +19,28 @@ use expect_test::{expect, Expect};
 use ff::Field;
 use ff::PrimeField;
 use std::fmt::Write;
+use std::fs::File;
+use std::path::Path;
+use std::time::{Duration, Instant};
+use flate2::Compression;
+use flate2::write::ZlibEncoder;
+use halo2curves::bn256::Bn256;
+use rand::Rng;
 use tap::TapOptional;
+use crate::spartan::{batched, batched_ppsnark};
+use crate::spartan::snark::RelaxedR1CSSNARK;
+use crate::supernova::snark::CompressedSNARK;
 
 use super::{utils::get_selector_vec_from_index, *};
 
 #[derive(Clone, Debug, Default)]
-struct CubicCircuit<F> {
+struct CubicCircuit<F, const N: usize> {
   _p: PhantomData<F>,
   circuit_index: usize,
   rom_size: usize,
 }
 
-impl<F> CubicCircuit<F> {
+impl<F, const N: usize> CubicCircuit<F, N> {
   fn new(circuit_index: usize, rom_size: usize) -> Self {
     Self {
       circuit_index,
@@ -90,7 +104,7 @@ fn next_rom_index_and_pc<F: PrimeField, CS: ConstraintSystem<F>>(
   Ok((rom_index_next, pc_next))
 }
 
-impl<F> StepCircuit<F> for CubicCircuit<F>
+impl<F, const N: usize> StepCircuit<F> for CubicCircuit<F, N>
   where
       F: PrimeField,
 {
@@ -140,6 +154,31 @@ impl<F> StepCircuit<F> for CubicCircuit<F>
       |lc| lc + CS::one(),
       |lc| lc + y.get_variable(),
     );
+
+    for i in 0..N {
+      let x = &z[0];
+      let x_sq = x.square(cs.namespace(|| format!("x_sq{}", i)))?;
+      let x_cu = x_sq.mul(cs.namespace(|| format!("x_cu{}", i)), x)?;
+      let y = AllocatedNum::alloc(cs.namespace(|| format!("y{}", i)), || {
+        Ok(x_cu.get_value().unwrap() + x.get_value().unwrap() + F::from(5u64))
+      })?;
+
+      cs.enforce(
+        || format!("y = x^3 + x + 5 ({})", i),
+        |lc| {
+          lc + x_cu.get_variable()
+              + x.get_variable()
+              + CS::one()
+              + CS::one()
+              + CS::one()
+              + CS::one()
+              + CS::one()
+        },
+        |lc| lc + CS::one(),
+        |lc| lc + y.get_variable(),
+      );
+
+    }
 
     let mut z_next = vec![y];
     z_next.push(rom_index_next);
@@ -271,30 +310,77 @@ fn print_constraints_name_on_error_index<
 
 const OPCODE_0: usize = 0;
 const OPCODE_1: usize = 1;
+const OPCODE_2: usize = 2;
+const OPCODE_3: usize = 3;
+const OPCODE_4: usize = 4;
+const OPCODE_5: usize = 5;
+const OPCODE_6: usize = 6;
+const OPCODE_7: usize = 7;
+const OPCODE_8: usize = 8;
+const OPCODE_9: usize = 9;
+const OPCODE_10: usize = 10;
 
 struct TestROM<E1> {
   rom: Vec<usize>,
   _p: PhantomData<E1>,
 }
 
+const OP_SIZE: usize = 14;
 #[derive(Debug, Clone)]
+
 enum TestROMCircuit<F: PrimeField> {
-  Cubic(CubicCircuit<F>),
-  Square(SquareCircuit<F>),
+  Cubic0(CubicCircuit<F, 0>),
+  Cubic1(CubicCircuit<F, 100000>),
+  Cubic2(CubicCircuit<F, 100100>),
+  Cubic3(CubicCircuit<F, 50200>),
+  Cubic4(CubicCircuit<F, 78900>),
+  Cubic5(CubicCircuit<F, 80080>),
+  Cubic6(CubicCircuit<F, 90003>),
+  Cubic7(CubicCircuit<F, 58000>),
+  Cubic8(CubicCircuit<F, 78900>),
+  Cubic9(CubicCircuit<F, 89080>),
+  Cubic10(CubicCircuit<F, 65000>),
+  Cubic11(CubicCircuit<F, 43800>),
+  Cubic12(CubicCircuit<F, 37890>),
+  Cubic13(CubicCircuit<F, 38991>),
 }
 
 impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
   fn arity(&self) -> usize {
     match self {
-      Self::Cubic(x) => x.arity(),
-      Self::Square(x) => x.arity(),
+      Self::Cubic0(x) => x.arity(),
+      Self::Cubic1(x) => x.arity(),
+      Self::Cubic2(x) => x.arity(),
+      Self::Cubic3(x) => x.arity(),
+      Self::Cubic4(x) => x.arity(),
+      Self::Cubic5(x) => x.arity(),
+      Self::Cubic6(x) => x.arity(),
+      Self::Cubic7(x) => x.arity(),
+      Self::Cubic8(x) => x.arity(),
+      Self::Cubic9(x) => x.arity(),
+      Self::Cubic10(x) => x.arity(),
+      Self::Cubic11(x) => x.arity(),
+      Self::Cubic12(x) => x.arity(),
+      Self::Cubic13(x) => x.arity(),
     }
   }
 
   fn circuit_index(&self) -> usize {
     match self {
-      Self::Cubic(x) => x.circuit_index(),
-      Self::Square(x) => x.circuit_index(),
+      Self::Cubic0(x) => x.circuit_index(),
+      Self::Cubic1(x) => x.circuit_index(),
+      Self::Cubic2(x) => x.circuit_index(),
+      Self::Cubic3(x) => x.circuit_index(),
+      Self::Cubic4(x) => x.circuit_index(),
+      Self::Cubic5(x) => x.circuit_index(),
+      Self::Cubic6(x) => x.circuit_index(),
+      Self::Cubic7(x) => x.circuit_index(),
+      Self::Cubic8(x) => x.circuit_index(),
+      Self::Cubic9(x) => x.circuit_index(),
+      Self::Cubic10(x) => x.circuit_index(),
+      Self::Cubic11(x) => x.circuit_index(),
+      Self::Cubic12(x) => x.circuit_index(),
+      Self::Cubic13(x) => x.circuit_index(),
     }
   }
 
@@ -305,8 +391,20 @@ impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
     z: &[AllocatedNum<F>],
   ) -> Result<(Option<AllocatedNum<F>>, Vec<AllocatedNum<F>>), SynthesisError> {
     match self {
-      Self::Cubic(x) => x.synthesize(cs, pc, z),
-      Self::Square(x) => x.synthesize(cs, pc, z),
+      Self::Cubic0(x) => x.synthesize(cs, pc, z),
+      Self::Cubic1(x) => x.synthesize(cs, pc, z),
+      Self::Cubic2(x) => x.synthesize(cs, pc, z),
+      Self::Cubic3(x) => x.synthesize(cs, pc, z),
+      Self::Cubic4(x) => x.synthesize(cs, pc, z),
+      Self::Cubic5(x) => x.synthesize(cs, pc, z),
+      Self::Cubic6(x) => x.synthesize(cs, pc, z),
+      Self::Cubic7(x) => x.synthesize(cs, pc, z),
+      Self::Cubic8(x) => x.synthesize(cs, pc, z),
+      Self::Cubic9(x) => x.synthesize(cs, pc, z),
+      Self::Cubic10(x) => x.synthesize(cs, pc, z),
+      Self::Cubic11(x) => x.synthesize(cs, pc, z),
+      Self::Cubic12(x) => x.synthesize(cs, pc, z),
+      Self::Cubic13(x) => x.synthesize(cs, pc, z),
     }
   }
 }
@@ -319,13 +417,25 @@ impl<E1> NonUniformCircuit<E1> for TestROM<E1>
   type C2 = TrivialSecondaryCircuit<<Dual<E1> as Engine>::Scalar>;
 
   fn num_circuits(&self) -> usize {
-    2
+    OP_SIZE
   }
 
   fn primary_circuit(&self, circuit_index: usize) -> Self::C1 {
     match circuit_index {
-      0 => TestROMCircuit::Cubic(CubicCircuit::new(circuit_index, self.rom.len())),
-      1 => TestROMCircuit::Square(SquareCircuit::new(circuit_index, self.rom.len())),
+      0 => TestROMCircuit::Cubic0(CubicCircuit::new(circuit_index, self.rom.len())),
+      1 => TestROMCircuit::Cubic1(CubicCircuit::new(circuit_index, self.rom.len())),
+      2 => TestROMCircuit::Cubic2(CubicCircuit::new(circuit_index, self.rom.len())),
+      3 => TestROMCircuit::Cubic3(CubicCircuit::new(circuit_index, self.rom.len())),
+      4 => TestROMCircuit::Cubic4(CubicCircuit::new(circuit_index, self.rom.len())),
+      5 => TestROMCircuit::Cubic5(CubicCircuit::new(circuit_index, self.rom.len())),
+      6 => TestROMCircuit::Cubic6(CubicCircuit::new(circuit_index, self.rom.len())),
+      7 => TestROMCircuit::Cubic7(CubicCircuit::new(circuit_index, self.rom.len())),
+      8 => TestROMCircuit::Cubic8(CubicCircuit::new(circuit_index, self.rom.len())),
+      9 => TestROMCircuit::Cubic9(CubicCircuit::new(circuit_index, self.rom.len())),
+      10 => TestROMCircuit::Cubic10(CubicCircuit::new(circuit_index, self.rom.len())),
+      11 => TestROMCircuit::Cubic11(CubicCircuit::new(circuit_index, self.rom.len())),
+      12 => TestROMCircuit::Cubic12(CubicCircuit::new(circuit_index, self.rom.len())),
+      13 => TestROMCircuit::Cubic13(CubicCircuit::new(circuit_index, self.rom.len())),
       _ => panic!("unsupported primary circuit index"),
     }
   }
@@ -348,9 +458,33 @@ impl<E1> TestROM<E1> {
   }
 }
 
-fn test_trivial_nivc_with<E1>()
+pub static BENCHMARK_DATA_FILE: &str = "./nova_benchmark.csv";
+
+pub fn append_to_bench_data_file(content: String) {
+  use std::io::Write;
+  let mut data_file = std::fs::OpenOptions::new()
+      .append(true)
+      .open(BENCHMARK_DATA_FILE)
+      .expect("cannot open file");
+  data_file.write(content.as_bytes()).expect("write failed");
+  println!("Append line: {}", content);
+}
+
+pub fn init_bench_data_file() {
+  let path = Path::new(BENCHMARK_DATA_FILE);
+  if !path.exists() {
+    File::create(&path).unwrap();
+  }
+  println!("Init bench data file in {}", BENCHMARK_DATA_FILE);
+  let header = "num_per_step,num_steps,total_num,time_generating_public_params (s),primary_circuit_constraints,secondary_circuit_constraints,primary_circuit_variables,secondary_circuit_variables,total_constraints,time_init_recursive_snark (s),time_folding (s),time_per_folding (s),time_verify_folding (s),time_compressed_snark_setup (s),time_compressed_snark_prove (s),time_compressed_snark_encoding (s),time_compressed_snark_verify (s),compressed_snark_len (bytes)\n";
+  append_to_bench_data_file(header.to_string());
+}
+
+fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
   where
       E1: CurveCycleEquipped,
+      S1: BatchedRelaxedR1CSSNARKTrait<E1>,
+      S2: RelaxedR1CSSNARKTrait<Dual<E1>>,
 {
   // Here demo a simple RAM machine
   // - with 2 argumented circuit
@@ -366,14 +500,36 @@ fn test_trivial_nivc_with<E1>()
   // This is mostly done with the existing Nova code. With additions of U_i[] and program_counter checks
   // in the augmented circuit.
 
-  let rom = vec![
-    OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1, OPCODE_1, OPCODE_0, OPCODE_0, OPCODE_1,
-    OPCODE_1,
-  ]; // Rom can be arbitrary length.
+  let mut rng = rand::thread_rng();
+  let rom = {
+    let mut counts = vec![single_count; OP_SIZE];
+    let mut v = vec![];
+    // let count = counts.iter().sum();
+    while counts.iter().sum::<usize>() != 0 {
+      let op_code = rng.gen_range(0..OP_SIZE);
+      if counts[op_code] == 0 {
+        continue;
+      }
+      counts[op_code] -= 1;
+      v.push(op_code);
+    }
+    v
+  };
+  append_to_bench_data_file(format!("op_code len: {}", rom.len()));
 
   let test_rom = TestROM::<E1>::new(rom);
 
+  let start = Instant::now();
   let pp = PublicParams::setup(&test_rom, &*default_ck_hint(), &*default_ck_hint());
+  let public_params_setup_time = start.elapsed();
+  append_to_bench_data_file(format!("PublicParams::setup, took {:?}", public_params_setup_time));
+  // pp.
+  for i in 0..OP_SIZE {
+    let (constraints, variable) = pp.num_constraints_and_variables(i);
+    append_to_bench_data_file(format!("primary circuit op_code: {}, constraints: {}, variables: {}", i, constraints, variable));
+  }
+  let (constraints, variable) = pp.num_constraints_and_variables_secondary();
+  append_to_bench_data_file(format!("secondary circuit: {}, variables: {}", constraints, variable));
 
   // extend z0_primary/secondary with rom content
   let mut z0_primary = vec![<E1 as Engine>::Scalar::ONE];
@@ -388,7 +544,8 @@ fn test_trivial_nivc_with<E1>()
 
   let mut recursive_snark_option: Option<RecursiveSNARK<E1>> = None;
 
-  for &op_code in test_rom.rom.iter() {
+  let mut prove_time = Duration::from_millis(0);
+  for (i, &op_code) in test_rom.rom.iter().enumerate() {
     let circuit_primary = test_rom.primary_circuit(op_code);
     let circuit_secondary = test_rom.secondary_circuit();
 
@@ -404,9 +561,13 @@ fn test_trivial_nivc_with<E1>()
           .unwrap()
     });
 
+    let start = Instant::now();
     recursive_snark
         .prove_step(&pp, &circuit_primary, &circuit_secondary)
         .unwrap();
+    let prove_step_time = start.elapsed();
+    append_to_bench_data_file(format!("step {} prove step, took {:?}", i, prove_step_time));
+    prove_time += prove_step_time;
     recursive_snark
         .verify(&pp, &z0_primary, &z0_secondary)
         .map_err(|err| {
@@ -422,20 +583,40 @@ fn test_trivial_nivc_with<E1>()
 
     recursive_snark_option = Some(recursive_snark)
   }
+  append_to_bench_data_file(format!("prove step, took {:?}", prove_time));
 
   assert!(recursive_snark_option.is_some());
 
   // Now you can handle the Result using if let
+  let recursive_snark = recursive_snark_option.unwrap();
   let RecursiveSNARK {
     zi_primary,
     zi_secondary,
     program_counter,
     ..
-  } = &recursive_snark_option.unwrap();
+  } = &recursive_snark;
 
-  println!("zi_primary: {:?}", zi_primary);
-  println!("zi_secondary: {:?}", zi_secondary);
-  println!("final program_counter: {:?}", program_counter);
+  append_to_bench_data_file(format!("zi_primary: {:?}", zi_primary));
+  append_to_bench_data_file(format!("zi_secondary: {:?}", zi_secondary));
+  append_to_bench_data_file(format!("final program_counter: {:?}", program_counter));
+
+
+  let start = Instant::now();
+  let (prover_key, verifier_key) = CompressedSNARK::<_, S1, S2>::setup(&pp).unwrap();
+  let compressed_snark_set_up_time = start.elapsed();
+  append_to_bench_data_file(format!("CompressedSNARK::setup, took {:?}", compressed_snark_set_up_time));
+
+  let start = Instant::now();
+  let compressed_snark = CompressedSNARK::prove(&pp, &prover_key, &recursive_snark).unwrap();
+  let compressed_snark_prove_time = start.elapsed();
+  append_to_bench_data_file(format!("CompressedSNARK::prove, took {:?}", compressed_snark_prove_time));
+
+  let start = Instant::now();
+  compressed_snark
+      .verify(&pp, &verifier_key, &z0_primary, &z0_secondary)
+      .unwrap();
+  let compressed_snark_verify_time = start.elapsed();
+  append_to_bench_data_file(format!("CompressedSNARK::verify, took {:?}", compressed_snark_verify_time));
 
   // The final program counter should be -1
   assert_eq!(*program_counter, -<E1 as Engine>::Scalar::ONE);
@@ -444,8 +625,17 @@ fn test_trivial_nivc_with<E1>()
 #[test]
 #[tracing_test::traced_test]
 fn test_trivial_nivc() {
+
+  type EE<E> = ipa_pc::EvaluationEngine<E>;
+  type S1<E> = batched::BatchedRelaxedR1CSSNARK<E, EE<E>>;
+  type S1PP<E> = batched_ppsnark::BatchedRelaxedR1CSSNARK<E, EE<E>>;
+  type S2<E> = RelaxedR1CSSNARK<E, EE<E>>;
   // Experimenting with selecting the running claims for nifs
-  test_trivial_nivc_with::<PallasEngine>();
+  init_bench_data_file();
+  println!("Init bench data file in {}", BENCHMARK_DATA_FILE);
+  for i in 1..2 {
+    test_trivial_nivc_with::<PallasEngine, S1<_>, S2<_>>(i);
+  }
 }
 
 // In the following we use 1 to refer to the primary, and 2 to refer to the secondary circuit

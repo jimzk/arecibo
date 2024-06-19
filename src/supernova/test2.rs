@@ -480,7 +480,7 @@ pub fn init_bench_data_file() {
   append_to_bench_data_file(header.to_string());
 }
 
-fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
+fn test_trivial_nivc_with<E1, S1, S2>(fold_steps: usize)
   where
       E1: CurveCycleEquipped,
       S1: BatchedRelaxedR1CSSNARKTrait<E1>,
@@ -501,21 +501,12 @@ fn test_trivial_nivc_with<E1, S1, S2>(single_count: usize)
   // in the augmented circuit.
 
   let start_timestamp = chrono::prelude::Utc::now();
+  let mut rom = vec![];
   let mut rng = rand::thread_rng();
-  let rom = {
-    let mut counts = vec![single_count; OP_SIZE];
-    let mut v = vec![];
-    // let count = counts.iter().sum();
-    while counts.iter().sum::<usize>() != 0 {
+  for _ in 0..fold_steps {
       let op_code = rng.gen_range(0..OP_SIZE);
-      if counts[op_code] == 0 {
-        continue;
-      }
-      counts[op_code] -= 1;
-      v.push(op_code);
-    }
-    v
-  };
+      rom.push(op_code);
+  }
   let ops_len = rom.len();
   println!("op_code len: {}", ops_len);
 
@@ -645,8 +636,9 @@ fn test_trivial_nivc() {
   // Experimenting with selecting the running claims for nifs
   init_bench_data_file();
   println!("Init bench data file in {}", BENCHMARK_DATA_FILE);
-  for i in 1..=10 {
-    test_trivial_nivc_with::<PallasEngine, S1<_>, S2<_>>(i);
+  let fold_steps_vec = vec![14, 28, 42, 56, 70, 84, 98, 112, 126, 140];
+  for fold_steps  in fold_steps_vec {
+    test_trivial_nivc_with::<PallasEngine, S1<_>, S2<_>>(fold_steps);
   }
 }
 

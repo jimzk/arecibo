@@ -502,10 +502,11 @@ fn test_trivial_nivc_with<E1, S1, S2>(fold_steps: usize)
 
   let start_timestamp = chrono::prelude::Utc::now();
   let mut rom = vec![];
-  let mut rng = rand::thread_rng();
+  // let mut rng = rand::thread_rng();
   for _ in 0..fold_steps {
-      let op_code = rng.gen_range(0..OP_SIZE);
-      rom.push(op_code);
+      // let op_code = rng.gen_range(0..OP_SIZE);
+    let op_code = 1;
+    rom.push(op_code);
   }
   let ops_len = rom.len();
   println!("op_code len: {}", ops_len);

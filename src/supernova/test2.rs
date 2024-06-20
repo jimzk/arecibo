@@ -325,7 +325,7 @@ struct TestROM<E1> {
   _p: PhantomData<E1>,
 }
 
-const OP_SIZE: usize = 14;
+const OP_SIZE: usize = 9;
 #[derive(Debug, Clone)]
 
 enum TestROMCircuit<F: PrimeField> {
@@ -338,11 +338,6 @@ enum TestROMCircuit<F: PrimeField> {
   Cubic6(CubicCircuit<F, 90003>),
   Cubic7(CubicCircuit<F, 58000>),
   Cubic8(CubicCircuit<F, 78900>),
-  Cubic9(CubicCircuit<F, 89080>),
-  Cubic10(CubicCircuit<F, 65000>),
-  Cubic11(CubicCircuit<F, 43800>),
-  Cubic12(CubicCircuit<F, 37890>),
-  Cubic13(CubicCircuit<F, 38991>),
 }
 
 impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
@@ -357,11 +352,6 @@ impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
       Self::Cubic6(x) => x.arity(),
       Self::Cubic7(x) => x.arity(),
       Self::Cubic8(x) => x.arity(),
-      Self::Cubic9(x) => x.arity(),
-      Self::Cubic10(x) => x.arity(),
-      Self::Cubic11(x) => x.arity(),
-      Self::Cubic12(x) => x.arity(),
-      Self::Cubic13(x) => x.arity(),
     }
   }
 
@@ -376,11 +366,6 @@ impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
       Self::Cubic6(x) => x.circuit_index(),
       Self::Cubic7(x) => x.circuit_index(),
       Self::Cubic8(x) => x.circuit_index(),
-      Self::Cubic9(x) => x.circuit_index(),
-      Self::Cubic10(x) => x.circuit_index(),
-      Self::Cubic11(x) => x.circuit_index(),
-      Self::Cubic12(x) => x.circuit_index(),
-      Self::Cubic13(x) => x.circuit_index(),
     }
   }
 
@@ -400,11 +385,6 @@ impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
       Self::Cubic6(x) => x.synthesize(cs, pc, z),
       Self::Cubic7(x) => x.synthesize(cs, pc, z),
       Self::Cubic8(x) => x.synthesize(cs, pc, z),
-      Self::Cubic9(x) => x.synthesize(cs, pc, z),
-      Self::Cubic10(x) => x.synthesize(cs, pc, z),
-      Self::Cubic11(x) => x.synthesize(cs, pc, z),
-      Self::Cubic12(x) => x.synthesize(cs, pc, z),
-      Self::Cubic13(x) => x.synthesize(cs, pc, z),
     }
   }
 }
@@ -431,11 +411,6 @@ impl<E1> NonUniformCircuit<E1> for TestROM<E1>
       6 => TestROMCircuit::Cubic6(CubicCircuit::new(circuit_index, self.rom.len())),
       7 => TestROMCircuit::Cubic7(CubicCircuit::new(circuit_index, self.rom.len())),
       8 => TestROMCircuit::Cubic8(CubicCircuit::new(circuit_index, self.rom.len())),
-      9 => TestROMCircuit::Cubic9(CubicCircuit::new(circuit_index, self.rom.len())),
-      10 => TestROMCircuit::Cubic10(CubicCircuit::new(circuit_index, self.rom.len())),
-      11 => TestROMCircuit::Cubic11(CubicCircuit::new(circuit_index, self.rom.len())),
-      12 => TestROMCircuit::Cubic12(CubicCircuit::new(circuit_index, self.rom.len())),
-      13 => TestROMCircuit::Cubic13(CubicCircuit::new(circuit_index, self.rom.len())),
       _ => panic!("unsupported primary circuit index"),
     }
   }

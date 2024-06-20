@@ -325,7 +325,7 @@ struct TestROM<E1> {
   _p: PhantomData<E1>,
 }
 
-const OP_SIZE: usize = 14;
+const OP_SIZE: usize = 15;
 #[derive(Debug, Clone)]
 
 enum TestROMCircuit<F: PrimeField> {
@@ -343,6 +343,7 @@ enum TestROMCircuit<F: PrimeField> {
   Cubic11(CubicCircuit<F, 43800>),
   Cubic12(CubicCircuit<F, 37890>),
   Cubic13(CubicCircuit<F, 38991>),
+  Cubic14(CubicCircuit<F, 3000000>),
 }
 
 impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
@@ -362,6 +363,7 @@ impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
       Self::Cubic11(x) => x.arity(),
       Self::Cubic12(x) => x.arity(),
       Self::Cubic13(x) => x.arity(),
+      Self::Cubic14(x) => x.arity(),
     }
   }
 
@@ -381,6 +383,7 @@ impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
       Self::Cubic11(x) => x.circuit_index(),
       Self::Cubic12(x) => x.circuit_index(),
       Self::Cubic13(x) => x.circuit_index(),
+      Self::Cubic14(x) => x.circuit_index(),
     }
   }
 
@@ -405,6 +408,7 @@ impl<F: PrimeField> StepCircuit<F> for TestROMCircuit<F> {
       Self::Cubic11(x) => x.synthesize(cs, pc, z),
       Self::Cubic12(x) => x.synthesize(cs, pc, z),
       Self::Cubic13(x) => x.synthesize(cs, pc, z),
+      Self::Cubic14(x) => x.synthesize(cs, pc, z),
     }
   }
 }
@@ -436,6 +440,7 @@ impl<E1> NonUniformCircuit<E1> for TestROM<E1>
       11 => TestROMCircuit::Cubic11(CubicCircuit::new(circuit_index, self.rom.len())),
       12 => TestROMCircuit::Cubic12(CubicCircuit::new(circuit_index, self.rom.len())),
       13 => TestROMCircuit::Cubic13(CubicCircuit::new(circuit_index, self.rom.len())),
+      14 => TestROMCircuit::Cubic14(CubicCircuit::new(circuit_index, self.rom.len())),
       _ => panic!("unsupported primary circuit index"),
     }
   }
@@ -504,7 +509,7 @@ fn test_trivial_nivc_with<E1, S1, S2>(fold_steps: usize)
   let mut rom = vec![];
   let mut rng = rand::thread_rng();
   for _ in 0..fold_steps {
-      let op_code = rng.gen_range(0..OP_SIZE);
+      let op_code = rng.gen_range(0..OP_SIZE - 1);
       rom.push(op_code);
   }
   let ops_len = rom.len();

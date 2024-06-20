@@ -559,7 +559,7 @@ fn test_trivial_nivc_with<E1, S1, S2>(fold_steps: usize)
         .prove_step(&pp, &circuit_primary, &circuit_secondary)
         .unwrap();
     let prove_step_time = start.elapsed();
-    println!("step {} prove step, took {:?}", i, prove_step_time);
+    println!("step {} prove step, took {:?}, op_code: {}", i, prove_step_time, op_code);
     prove_time += prove_step_time;
     recursive_snark
         .verify(&pp, &z0_primary, &z0_secondary)
